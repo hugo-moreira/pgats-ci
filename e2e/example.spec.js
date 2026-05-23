@@ -10,8 +10,8 @@ test.describe(`user rides`, async () => {
     await page.getByRole('link', { name: 'Choose Roba Swings' }).click();
     await page.getByLabel('Amount of people').selectOption('2');
     await page.getByRole('button', { name: 'Next' }).click();
-
-    await expect(page).toHaveURL(/success/);
+    expect(page.url()).toContain(`success`);
+    //await expect(page).toHaveURL(/success/);
   });
 
   test('user above height should not be allowed', async ({ page }) => {
