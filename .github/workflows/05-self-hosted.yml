@@ -1,0 +1,67 @@
+# CI de nível 05 - Self-hosted Runner
+# Exercício 3: pipeline executada em um runner próprio registrado localmente
+#
+# Como registrar o runner (executar uma única vez na máquina host):
+#   1. GitHub: Settings > Actions > Runners > New self-hosted runner
+#   2. Escolha Linux e execute os comandos exibidos na tela:
+#
+#      mkdir actions-runner && cd actions-runner
+#      curl -o actions-runner-linux-x64.tar.gz -L \
+#        https://github.com/actions/runner/releases/download/v2.319.1/actions-runner-linux-x64-2.319.1.tar.gz
+#      tar xzf ./actions-runner-linux-x64.tar.gz
+#      ./config.sh --url https://github.com/hugo-moreira/pgats-ci --token <TOKEN>
+#      sudo ./svc.sh install && sudo ./svc.sh start
+#
+#   3. O runner aparece como "Idle" em Settings > Actions > Runners
+#
+# Veja a avaliação completa em: docs/self-hosted-runners.md
+
+name: 'Self-hosted Runner'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e-test:
+    # direciona o job para o runner registrado na máquina local
+    # se tiver múltiplos runners com labels customizados, use:
+    # runs-on: [self-hosted, linux, pgats-ci]
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: instalando Yarn
+        run: npm install -g yarn
+
+      - name: instalando dependências
+        run: yarn
+
+      # em self-hosted os browsers ficam cacheados entre execuções,
+      # sem precisar baixar novamente a cada run
+      - name: instalando Browsers do Playwright
+        run: yarn playwright install chromium
+
+      - name: executando testes e2e
+        continue-on-error: true
+        run: yarn run e2e
+
+      - name: publicando resultados dos testes
+        uses: dorny/test-reporter@v1
+        with:
+          name: 'Playwright E2E — Self-hosted'
+          path: results.xml
+          reporter: java-junit
+          fail-on-error: true
+
+      - name: publicando relatório HTML do Playwright
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-self-hosted
+          path: playwright-report/
+          retention-days: 7
