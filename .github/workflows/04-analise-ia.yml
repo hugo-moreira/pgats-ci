@@ -1,0 +1,95 @@
+# CI de nível 04 - Análise de Falhas com IA (Gemini)
+#
+# Action do GitHub Marketplace utilizada:
+#   google-github-actions/run-gemini-cli@v0.1.22
+#   Executa o Gemini CLI dentro do pipeline e retorna a resposta da IA
+#   como output do step, que pode ser usado em steps seguintes.
+#   https://github.com/marketplace/actions/run-gemini-cli
+#
+# Pré-requisito (configurar uma única vez):
+#   1. Acesse https://aistudio.google.com/apikey e gere uma chave gratuita
+#   2. No GitHub: Settings > Secrets and variables > Actions > New repository secret
+#      Nome:  GEMINI_API_KEY
+#      Valor: chave gerada no Google AI Studio
+
+name: 'Análise de Falhas com IA'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-latest
+
+    permissions:
+      checks: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: instalando Yarn
+        run: npm install -g yarn
+
+      - name: instalando dependências
+        run: yarn
+
+      - name: instalando Browsers do Playwright
+        run: yarn playwright install --with-deps chromium
+
+      # continue-on-error garante que a análise da IA execute mesmo com falhas
+      - name: executando testes e2e
+        id: testes
+        continue-on-error: true
+        run: yarn run e2e
+
+      # extrai somente as mensagens de falha do XML para não exceder o limite do prompt
+      - name: extraindo falhas do relatório
+        if: steps.testes.outcome == 'failure'
+        id: falhas
+        run: |
+          FALHAS=$(grep -oP '(?<=message=")[^"]*' results.xml | head -20 | tr '\n' ' ')
+          echo "conteudo=$FALHAS" >> $GITHUB_OUTPUT
+
+      # envia as falhas para o Gemini e recebe análise em português
+      - name: analisando falhas com Gemini
+        if: steps.testes.outcome == 'failure'
+        id: gemini
+        uses: google-github-actions/run-gemini-cli@v0.1.22
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          prompt: |
+            Você é um especialista em automação de testes com Playwright.
+            Analise as seguintes mensagens de falha de testes E2E e responda em português:
+            1. O que cada falha significa?
+            2. Qual é a causa mais provável?
+            3. Como corrigir?
+
+            Falhas encontradas:
+            ${{ steps.falhas.outputs.conteudo }}
+
+      # publica a análise da IA no resumo da execução (aba Summary do workflow)
+      - name: publicando análise no resumo do workflow
+        if: steps.testes.outcome == 'failure'
+        run: |
+          echo "## Análise de Falhas — Gemini AI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.gemini.outputs.summary }}" >> $GITHUB_STEP_SUMMARY
+
+      # publica o relatório HTML como artefato para consulta detalhada
+      - name: publicando relatório HTML do Playwright
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      # encerra o job com falha se os testes falharam (após publicar tudo)
+      - name: verificando resultado final
+        if: steps.testes.outcome == 'failure'
+        run: exit 1
