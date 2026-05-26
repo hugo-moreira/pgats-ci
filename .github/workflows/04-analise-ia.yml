@@ -1,16 +1,23 @@
-# CI de nível 04 - Análise de Falhas com IA (Gemini)
+# CI de nível 04 - Análise de Falhas com IA (Gemini) + Notificação no Discord
 #
-# Action do GitHub Marketplace utilizada:
+# Actions do GitHub Marketplace utilizadas:
 #   google-github-actions/run-gemini-cli@v0.1.22
 #   Executa o Gemini CLI dentro do pipeline e retorna a resposta da IA
 #   como output do step, que pode ser usado em steps seguintes.
 #   https://github.com/marketplace/actions/run-gemini-cli
 #
-# Pré-requisito (configurar uma única vez):
+#   Ilshidur/action-discord@master
+#   Envia a análise do Gemini com o trecho de código a corrigir para o Discord.
+#   https://github.com/marketplace/actions/actions-for-discord
+#
+# Pré-requisitos (configurar uma única vez):
 #   1. Acesse https://aistudio.google.com/apikey e gere uma chave gratuita
-#   2. No GitHub: Settings > Secrets and variables > Actions > New repository secret
-#      Nome:  GEMINI_API_KEY
-#      Valor: chave gerada no Google AI Studio
+#      No GitHub: Settings > Secrets and variables > Actions > New repository secret
+#      Nome:  GEMINI_API_KEY  |  Valor: chave gerada no Google AI Studio
+#
+#   2. No Discord: canal > Integrações > Webhooks > Novo Webhook > copiar URL
+#      No GitHub: Settings > Secrets and variables > Actions > New repository secret
+#      Nome:  DISCORD_WEBHOOK  |  Valor: URL copiada do Discord
 
 name: 'Análise de Falhas com IA'
 
@@ -47,15 +54,21 @@ jobs:
         continue-on-error: true
         run: yarn run e2e
 
-      # extrai somente as mensagens de falha do XML para não exceder o limite do prompt
+      # extrai mensagens de falha do XML e o trecho do arquivo de teste que falhou
       - name: extraindo falhas do relatório
         if: steps.testes.outcome == 'failure'
         id: falhas
         run: |
-          FALHAS=$(grep -oP '(?<=message=")[^"]*' results.xml | head -20 | tr '\n' ' ')
-          echo "conteudo=$FALHAS" >> $GITHUB_OUTPUT
+          # mensagens de erro do JUnit XML
+          FALHAS=$(grep -oP '(?<=message=")[^"]*' results.xml | head -10 | tr '\n' '|')
 
-      # envia as falhas para o Gemini e recebe análise em português
+          # nome do arquivo e linha que falhou
+          ARQUIVO=$(grep -oP '(?<=classname=")[^"]*' results.xml | head -5 | tr '\n' '|')
+
+          echo "conteudo=$FALHAS" >> $GITHUB_OUTPUT
+          echo "arquivo=$ARQUIVO" >> $GITHUB_OUTPUT
+
+      # envia falhas e trecho do código para o Gemini analisar
       - name: analisando falhas com Gemini
         if: steps.testes.outcome == 'failure'
         id: gemini
@@ -64,13 +77,16 @@ jobs:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           prompt: |
             Você é um especialista em automação de testes com Playwright.
-            Analise as seguintes mensagens de falha de testes E2E e responda em português:
-            1. O que cada falha significa?
-            2. Qual é a causa mais provável?
-            3. Como corrigir?
+            Analise as falhas abaixo e responda em português de forma objetiva e curta
+            (máximo 800 caracteres no total para caber no Discord):
 
-            Falhas encontradas:
-            ${{ steps.falhas.outputs.conteudo }}
+            Falhas: ${{ steps.falhas.outputs.conteudo }}
+            Arquivo: ${{ steps.falhas.outputs.arquivo }}
+
+            Responda exatamente neste formato:
+            🔍 O que falhou: <explicação curta>
+            💡 Causa provável: <causa curta>
+            🛠️ Como corrigir: <trecho de código corrigido em uma linha>
 
       # publica a análise da IA no resumo da execução (aba Summary do workflow)
       - name: publicando análise no resumo do workflow
@@ -79,6 +95,21 @@ jobs:
           echo "## Análise de Falhas — Gemini AI" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.gemini.outputs.summary }}" >> $GITHUB_STEP_SUMMARY
+
+      # envia análise da IA + link para o Discord
+      - name: notificando Discord com análise da IA
+        if: steps.testes.outcome == 'failure'
+        uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: |
+            ❌ **[${{ github.repository }}] Testes E2E falharam!**
+            Branch: `${{ github.ref_name }}` | Executado por: ${{ github.actor }}
+
+            ${{ steps.gemini.outputs.summary }}
+
+            🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       # publica o relatório HTML como artefato para consulta detalhada
       - name: publicando relatório HTML do Playwright
