@@ -1,0 +1,69 @@
+# CI de nível 03 - Notificação no Discord
+#
+# Action do GitHub Marketplace utilizada:
+#   Ilshidur/action-discord@master
+#   Envia uma mensagem para um canal do Discord via webhook ao final
+#   da execução dos testes, informando se passaram ou falharam.
+#   https://github.com/marketplace/actions/actions-for-discord
+#
+# Pré-requisitos (configurar uma única vez):
+#   1. No Discord: canal > Integrações > Webhooks > Novo Webhook > copiar URL
+#   2. No GitHub: Settings > Secrets and variables > Actions > New repository secret
+#      Nome:  DISCORD_WEBHOOK
+#      Valor: URL copiada do Discord
+
+name: 'Notificação Discord'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: instalando Yarn
+        run: npm install -g yarn
+
+      - name: instalando dependências
+        run: yarn
+
+      - name: instalando Browsers do Playwright
+        run: yarn playwright install --with-deps chromium
+
+      # id no step permite capturar o resultado (success/failure) nos steps seguintes
+      - name: executando testes e2e
+        id: testes
+        run: yarn run e2e
+
+      # notificação enviada quando todos os testes passam
+      - name: notificando Discord - testes aprovados
+        if: success()
+        uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: |
+            ✅ **[${{ github.repository }}] Testes E2E aprovados!**
+            Branch: `${{ github.ref_name }}`
+            Executado por: ${{ github.actor }}
+            🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      # notificação enviada quando algum teste falha
+      - name: notificando Discord - testes reprovados
+        if: failure()
+        uses: Ilshidur/action-discord@master
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        with:
+          args: |
+            ❌ **[${{ github.repository }}] Testes E2E falharam!**
+            Branch: `${{ github.ref_name }}`
+            Executado por: ${{ github.actor }}
+            🔗 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
