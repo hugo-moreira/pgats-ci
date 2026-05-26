@@ -126,3 +126,4 @@ jobs:
       - name: verificando resultado final
         if: steps.testes.outcome == 'failure'
         run: exit 1
+ 
