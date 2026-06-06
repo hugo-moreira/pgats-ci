@@ -28,6 +28,11 @@ jobs:
     # runs-on: [self-hosted, linux, pgats-ci]
     runs-on: self-hosted
 
+    # permissão exigida pelo dorny/test-reporter para criar checks na UI
+    permissions:
+      checks: write
+      pull-requests: write
+
     steps:
       - uses: actions/checkout@v4
 
