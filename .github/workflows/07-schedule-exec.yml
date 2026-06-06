@@ -4,7 +4,7 @@
 name: 'Execução Schedule'
 on:
   schedule:
-    - cron: '0 */3 * * *' # executa a cada 3 minutos
+    - cron: '*/3 * * * *' # executa a cada 3 minutos
 
 jobs:
   e2e-test:
